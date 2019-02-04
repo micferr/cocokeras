@@ -12,11 +12,20 @@ from keras.utils import plot_model
 from keras.layers import Dense, Flatten
 from keras.layers import Conv2D, Input, MaxPooling2D
 
-NUM_CATEGORIES = 91
-IMAGE_SIZE = 256
-NORMALIZE = True
+NUM_CATEGORIES = 91  # Total number of categories in Coco dataset
+IMAGE_SIZE = 256  # Size of the input images
+NORMALIZE = True  # Normalize RGB values
 BATCH_SIZE = 32
 EPOCHS = 12
+
+CONV_LAYERS = 2  # Number of Convolution+Pooling layers
+CONV_NUM_FILTERS = 32
+CONV_FILTER_SIZE = (5, 5)
+CONV_POOLING_SIZE = (3, 3)
+CONV_STRIDE = 3
+
+SINGLE_CATEGORIES = False
+SINGLE_CATEGORY = 1
 
 dataDir = 'coco'
 dataType = 'val2017'
@@ -86,20 +95,20 @@ class CocoBatchGenerator(keras.utils.Sequence):
 
         # Convert the batch's X and Y to be fed to the net
         _x_train = np.asarray(_input_imgs)
-        _y_train = np.array([imgids_to_cats[imgid] for imgid in _imgids])
+        if not SINGLE_CATEGORIES:
+            _y_train = np.array([imgids_to_cats[imgid] for imgid in _imgids])
+        else:
+            _y_train = np.array([[imgids_to_cats[imgid][SINGLE_CATEGORY]] for imgid in _imgids])
         return _x_train, _y_train
 
 
 # Create the model
 input = Input(shape=(IMAGE_SIZE, IMAGE_SIZE, 3))
-x = Conv2D(32, (5, 5), activation='relu', padding='same')(input)
-x = MaxPooling2D(pool_size=(2, 2))(x)
-x = Conv2D(32, (5, 5), activation='relu', padding='same')(x)
-x = MaxPooling2D(pool_size=(2, 2))(x)
-x = Conv2D(32, (5, 5), activation='relu', padding='same')(x)
-x = MaxPooling2D(pool_size=(2, 2))(x)
+for i in range(CONV_LAYERS):
+    x = Conv2D(CONV_NUM_FILTERS, CONV_FILTER_SIZE, strides=CONV_STRIDE, activation='relu', padding='same')(x if i != 0 else input)
+    x = MaxPooling2D(pool_size=CONV_POOLING_SIZE)(x)
 x = Flatten()(x)
-out = Dense(NUM_CATEGORIES, activation='sigmoid')(x)
+out = Dense(NUM_CATEGORIES if (not SINGLE_CATEGORIES) else 1, activation='sigmoid')(x)
 model = Model(inputs=input, outputs=out)
 
 model.compile(optimizer='rmsprop', loss='binary_crossentropy')
