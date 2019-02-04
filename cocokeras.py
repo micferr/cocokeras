@@ -13,8 +13,7 @@ from keras.layers import Dense, Flatten
 from keras.layers import Conv2D, Input, MaxPooling2D
 
 NUM_CATEGORIES = 91
-IMAGE_WIDTH = 256
-IMAGE_HEIGHT = 256
+IMAGE_SIZE = 256
 NORMALIZE = True
 BATCH_SIZE = 32
 EPOCHS = 12
@@ -74,12 +73,12 @@ class CocoBatchGenerator(keras.utils.Sequence):
         ) for imgid in _imgids]
 
         # Rescale all images to the same size
-        _input_imgs = [cv2.resize(img, (IMAGE_WIDTH, IMAGE_HEIGHT)) for img in _input_imgs]
+        _input_imgs = [cv2.resize(img, (IMAGE_SIZE, IMAGE_SIZE)) for img in _input_imgs]
 
         # Convert grayscale images to RGB
         for _index in range(len(_input_imgs)):
-            if _input_imgs[_index].shape == (256, 256):
-                _input_imgs[_index] = np.repeat(_input_imgs[_index], 3).reshape(IMAGE_WIDTH, IMAGE_HEIGHT, 3)
+            if _input_imgs[_index].shape == (IMAGE_SIZE, IMAGE_SIZE):
+                _input_imgs[_index] = np.repeat(_input_imgs[_index], 3).reshape(IMAGE_SIZE, IMAGE_SIZE, 3)
 
         # If enabled, normalize pixel values (ranges from [0 - 255] to [0.0 - 1.0])
         if NORMALIZE:
@@ -92,14 +91,12 @@ class CocoBatchGenerator(keras.utils.Sequence):
 
 
 # Create the model
-input = Input(shape=(IMAGE_HEIGHT, IMAGE_WIDTH, 3))
-x = Conv2D(32, (5, 5), activation='relu')(input)
+input = Input(shape=(IMAGE_SIZE, IMAGE_SIZE, 3))
+x = Conv2D(32, (5, 5), activation='relu', padding='same')(input)
 x = MaxPooling2D(pool_size=(2, 2))(x)
-x = Conv2D(32, (5, 5), activation='relu')(x)
+x = Conv2D(32, (5, 5), activation='relu', padding='same')(x)
 x = MaxPooling2D(pool_size=(2, 2))(x)
-x = Conv2D(32, (5, 5), activation='relu')(x)
-x = MaxPooling2D(pool_size=(2, 2))(x)
-x = Conv2D(32, (5, 5), activation='relu')(x)
+x = Conv2D(32, (5, 5), activation='relu', padding='same')(x)
 x = MaxPooling2D(pool_size=(2, 2))(x)
 x = Flatten()(x)
 out = Dense(NUM_CATEGORIES, activation='sigmoid')(x)
