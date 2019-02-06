@@ -4,10 +4,14 @@ import cv2
 import keras
 import matplotlib.image
 import numpy as np
-from keras import Model
+
+import matplotlib.pyplot as plt
 
 from pycocotools.coco import COCO
 
+from keras import Model
+from keras.callbacks import EarlyStopping, TensorBoard
+from keras.optimizers import RMSprop
 from keras.utils import plot_model
 from keras.layers import Dense, Flatten
 from keras.layers import Conv2D, Input, MaxPooling2D
@@ -16,13 +20,13 @@ NUM_CATEGORIES = 91  # Total number of categories in Coco dataset
 IMAGE_SIZE = 256  # Size of the input images
 NORMALIZE = True  # Normalize RGB values
 BATCH_SIZE = 32
-EPOCHS = 12
+EPOCHS = 100
 
-CONV_LAYERS = 2  # Number of Convolution+Pooling layers
+CONV_LAYERS = 4  # Number of Convolution+Pooling layers
 CONV_NUM_FILTERS = 32
 CONV_FILTER_SIZE = (5, 5)
 CONV_POOLING_SIZE = (3, 3)
-CONV_STRIDE = 3
+CONV_STRIDE = 1
 
 SINGLE_CATEGORIES = False
 SINGLE_CATEGORY = 1
@@ -57,7 +61,7 @@ class CocoBatchGenerator(keras.utils.Sequence):
         self.batch_index = 0
 
     def __len__(self):
-        return int(np.floor(len(self.img_order) / BATCH_SIZE))
+        return int(np.floor(len(self.img_order) / BATCH_SIZE) * 0.1)
 
     def __getitem__(self, index):
         # Generate indexes of the batch
@@ -102,17 +106,78 @@ class CocoBatchGenerator(keras.utils.Sequence):
         return _x_train, _y_train
 
 
-# Create the model
-input = Input(shape=(IMAGE_SIZE, IMAGE_SIZE, 3))
-for i in range(CONV_LAYERS):
-    x = Conv2D(CONV_NUM_FILTERS, CONV_FILTER_SIZE, strides=CONV_STRIDE, activation='relu', padding='same')(x if i != 0 else input)
-    x = MaxPooling2D(pool_size=CONV_POOLING_SIZE)(x)
-x = Flatten()(x)
-out = Dense(NUM_CATEGORIES if (not SINGLE_CATEGORIES) else 1, activation='sigmoid')(x)
-model = Model(inputs=input, outputs=out)
+class TrainParams():
+    def __init__(
+            self,
+            nn_id="",
+            batch_size=BATCH_SIZE,
+            epochs=100,
+            early_stop=True,
 
-model.compile(optimizer='rmsprop', loss='binary_crossentropy')
-print(model.summary())
-plot_model(model, 'model.png', show_shapes=True)
-training_generator = CocoBatchGenerator()
-model.fit_generator(training_generator, epochs=EPOCHS)
+            image_size=IMAGE_SIZE,
+
+            conv_layers=CONV_LAYERS,
+            conv_num_filters=CONV_NUM_FILTERS,
+            conv_filter_size=CONV_FILTER_SIZE,
+            conv_pooling_size=CONV_POOLING_SIZE,
+            conv_stride=CONV_STRIDE
+    ):
+        self.nn_id = nn_id
+        self.batch_size = batch_size,
+        self.epochs = epochs,
+        self.early_stop = early_stop,
+
+        self.image_size = image_size
+
+        self.conv_layers = conv_layers
+        self.conv_num_filters = conv_num_filters
+        self.conv_filter_size = conv_filter_size
+        self.conv_pooling_size = conv_pooling_size
+        self.conv_stride = conv_stride
+
+
+def train_model(params):
+    """
+    :type params: TrainParams
+    """
+    # Create the model
+    input = Input(shape=(params.image_size, params.image_size, 3))
+    for i in range(params.conv_layers):
+        x = Conv2D(
+            params.conv_num_filters,
+            params.conv_filter_size,
+            strides=params.conv_stride,
+            activation='relu',
+            padding='same'
+        )(x if i != 0 else input)
+        x = MaxPooling2D(pool_size=params.conv_pooling_size)(x)
+    x = Flatten()(x)
+    out = Dense(NUM_CATEGORIES if (not SINGLE_CATEGORIES) else 1, activation='sigmoid')(x)
+    model = Model(inputs=input, outputs=out)
+
+    model.compile(optimizer=RMSprop(), loss='binary_crossentropy')
+    print(model.summary())
+    plot_model(model, 'model' + str(params.nn_id) + '.png', show_shapes=True)
+    training_generator = CocoBatchGenerator()
+    history = model.fit_generator(
+        training_generator,
+        epochs=params.epochs,
+        callbacks=[
+            TensorBoard(log_dir='./tb')
+        ] + ([EarlyStopping('loss', patience=2)] if params.early_stop else [])
+    )
+
+    plot_x = list(range(1, len(history.history['loss']) + 1))
+    plot_y = np.array(history.history['loss'])
+
+    plt.figure(2)
+    plt.xlabel('Epoch')
+    plt.ylabel('Loss')
+    plt.xlim(0.0, 100.0)
+    plt.ylim(0.0, 1.0)
+    plt.plot(plot_x, plot_y, color='blue', linestyle='-')
+    plt.savefig('loss' + str(params.nn_id) + '.png', dpi=300)
+
+
+params = TrainParams()
+train_model(params)
