@@ -1,3 +1,4 @@
+import json
 import random
 
 import cv2
@@ -13,14 +14,16 @@ from keras import Model
 from keras.callbacks import EarlyStopping, TensorBoard
 from keras.optimizers import RMSprop
 from keras.utils import plot_model
+from keras.models import save_model
 from keras.layers import Dense, Flatten
 from keras.layers import Conv2D, Input, MaxPooling2D
 
 NUM_CATEGORIES = 91  # Total number of categories in Coco dataset
 IMAGE_SIZE = 256  # Size of the input images
+LEARNING_RATE = 0.1
 NORMALIZE = True  # Normalize RGB values
 BATCH_SIZE = 32
-EPOCHS = 100
+EPOCHS = 10
 
 CONV_LAYERS = 4  # Number of Convolution+Pooling layers
 CONV_NUM_FILTERS = 32
@@ -56,17 +59,15 @@ input_imgids = [img['id'] for img in coco.dataset['images']]
 
 
 class CocoBatchGenerator(keras.utils.Sequence):
-    def __init__(self):
-        self.img_order = list(range(len(input_imgids)))
-        self.batch_index = 0
+    def __init__(self, imgids):
+        self.img_order = imgids
 
     def __len__(self):
         return int(np.floor(len(self.img_order) / BATCH_SIZE) * 0.1)
 
     def __getitem__(self, index):
         # Generate indexes of the batch
-        indexes = self.img_order[self.batch_index * BATCH_SIZE: (self.batch_index + 1) * BATCH_SIZE]
-        self.batch_index += 1
+        indexes = self.img_order[index * BATCH_SIZE: (index + 1) * BATCH_SIZE]
 
         # Generate data
         x, y = self.__data_generation(indexes)
@@ -74,12 +75,8 @@ class CocoBatchGenerator(keras.utils.Sequence):
 
     def on_epoch_end(self):
         random.shuffle(self.img_order)
-        self.batch_index = 0
 
     def __data_generation(self, _imgids):
-        # Get images' IDs
-        _imgids = [coco.dataset['images'][i]['id'] for i in _imgids]
-
         # Load image files
         _input_imgs = [matplotlib.image.imread(
             dataDir + '/images/' + ('0' * (12 - len(str(imgid)))) + str(imgid) + '.jpg'
@@ -106,27 +103,29 @@ class CocoBatchGenerator(keras.utils.Sequence):
         return _x_train, _y_train
 
 
-class TrainParams():
+class TrainParams:
     def __init__(
             self,
-            nn_id="",
+            nn_id=0,
             batch_size=BATCH_SIZE,
-            epochs=100,
+            epochs=EPOCHS,
+            learning_rate=LEARNING_RATE,
             early_stop=True,
-
             image_size=IMAGE_SIZE,
 
             conv_layers=CONV_LAYERS,
             conv_num_filters=CONV_NUM_FILTERS,
             conv_filter_size=CONV_FILTER_SIZE,
             conv_pooling_size=CONV_POOLING_SIZE,
-            conv_stride=CONV_STRIDE
+            conv_stride=CONV_STRIDE,
+
+            base_dir="./out/"
     ):
         self.nn_id = nn_id
-        self.batch_size = batch_size,
-        self.epochs = epochs,
-        self.early_stop = early_stop,
-
+        self.batch_size = batch_size
+        self.epochs = epochs
+        self.learning_rate = learning_rate
+        self.early_stop = early_stop
         self.image_size = image_size
 
         self.conv_layers = conv_layers
@@ -135,8 +134,14 @@ class TrainParams():
         self.conv_pooling_size = conv_pooling_size
         self.conv_stride = conv_stride
 
+        self.base_dir = base_dir
 
-def train_model(params):
+    def __str__(self):
+        return json.dumps(self, default=lambda o: o.__dict__,
+                          sort_keys=True, indent=4)
+
+
+def train_model(params, data, kfold_cross_iteration):
     """
     :type params: TrainParams
     """
@@ -157,27 +162,59 @@ def train_model(params):
 
     model.compile(optimizer=RMSprop(), loss='binary_crossentropy')
     print(model.summary())
-    plot_model(model, 'model' + str(params.nn_id) + '.png', show_shapes=True)
-    training_generator = CocoBatchGenerator()
+    plot_model(model, params.base_dir + 'graph' + str(params.nn_id) + '.png', show_shapes=True)
+    train_generator = CocoBatchGenerator(data[0])
+    val_generator = CocoBatchGenerator(data[1])
+    callbacks = [TensorBoard(log_dir='./tb')]
+    if params.early_stop:
+        callbacks += [EarlyStopping('loss', patience=2)]
     history = model.fit_generator(
-        training_generator,
+        train_generator,
         epochs=params.epochs,
-        callbacks=[
-            TensorBoard(log_dir='./tb')
-        ] + ([EarlyStopping('loss', patience=2)] if params.early_stop else [])
+        callbacks=callbacks,
+        validation_data=val_generator
     )
 
-    plot_x = list(range(1, len(history.history['loss']) + 1))
-    plot_y = np.array(history.history['loss'])
+    save_model(model, params.base_dir + "model" + str(params.nn_id) + '_' + str(kfold_cross_iteration) + ".h5")
+    with open(params.base_dir + "history" + str(params.nn_id) + '_' + str(kfold_cross_iteration) + ".txt", "w+") as f:
+        for i in range(len(history.history['val_loss'])):
+            f.write("{} {}\n".format(i + 1, history.history['val_loss'][i]))
 
-    plt.figure(2)
+    plot_x = list(range(1, len(history.history['val_loss']) + 1))
+    plot_y = history.history['val_loss']
+
+    plt.figure()
     plt.xlabel('Epoch')
     plt.ylabel('Loss')
-    plt.xlim(0.0, 100.0)
+    plt.xlim(0.0, params.epochs)
     plt.ylim(0.0, 1.0)
     plt.plot(plot_x, plot_y, color='blue', linestyle='-')
-    plt.savefig('loss' + str(params.nn_id) + '.png', dpi=300)
+    plt.savefig(params.base_dir + 'loss' + str(params.nn_id) + '_' + str(kfold_cross_iteration) + '.png', dpi=300)
+
+
+class KFoldCrossValidator:
+    def __init__(self, k, data):
+        self.k = k
+        self.data = data
+
+    def __len__(self):
+        return self.k
+
+    def __getitem__(self, item):
+        val_size = len(self.data) // self.k
+        train_data = self.data[:item * val_size] + self.data[(item + 1) * val_size:]
+        val_data = self.data[item * val_size: (item + 1) * val_size]
+        return train_data, val_data
 
 
 params = TrainParams()
-train_model(params)
+kcross = KFoldCrossValidator(4, input_imgids)
+for lr in [0.001, 0.01]:  # Learning rate
+    for cl in [1, 2]:  # Num conv layers
+        params.learning_rate = lr
+        params.conv_layers = cl
+        for k in range(len(kcross)):
+            train_model(params, kcross[k], k)
+        with open(params.base_dir + "params" + str(params.nn_id) + ".txt", "w+") as f:
+            f.write(str(params))
+        params.nn_id += 1
