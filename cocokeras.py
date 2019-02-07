@@ -162,10 +162,9 @@ def train_model(params, data, kfold_cross_iteration):
 
     model.compile(optimizer=RMSprop(), loss='binary_crossentropy')
     print(model.summary())
-    plot_model(model, params.base_dir + 'graph' + str(params.nn_id) + '.png', show_shapes=True)
     train_generator = CocoBatchGenerator(data[0])
     val_generator = CocoBatchGenerator(data[1])
-    callbacks = [TensorBoard(log_dir='./tb')]
+    callbacks = []
     if params.early_stop:
         callbacks += [EarlyStopping('loss', patience=2)]
     history = model.fit_generator(
@@ -175,21 +174,9 @@ def train_model(params, data, kfold_cross_iteration):
         validation_data=val_generator
     )
 
-    save_model(model, params.base_dir + "model" + str(params.nn_id) + '_' + str(kfold_cross_iteration) + ".h5")
     with open(params.base_dir + "history" + str(params.nn_id) + '_' + str(kfold_cross_iteration) + ".txt", "w+") as f:
         for i in range(len(history.history['val_loss'])):
             f.write("{} {}\n".format(i + 1, history.history['val_loss'][i]))
-
-    plot_x = list(range(1, len(history.history['val_loss']) + 1))
-    plot_y = history.history['val_loss']
-
-    plt.figure()
-    plt.xlabel('Epoch')
-    plt.ylabel('Loss')
-    plt.xlim(0.0, params.epochs)
-    plt.ylim(0.0, 1.0)
-    plt.plot(plot_x, plot_y, color='blue', linestyle='-')
-    plt.savefig(params.base_dir + 'loss' + str(params.nn_id) + '_' + str(kfold_cross_iteration) + '.png', dpi=300)
 
 
 class KFoldCrossValidator:
