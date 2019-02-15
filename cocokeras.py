@@ -23,7 +23,7 @@ IMAGE_SIZE = 256  # Size of the input images
 LEARNING_RATE = 0.1
 NORMALIZE = True  # Normalize RGB values
 BATCH_SIZE = 32
-EPOCHS = 10
+EPOCHS = 20
 
 CONV_LAYERS = 4  # Number of Convolution+Pooling layers
 CONV_NUM_FILTERS = 32
@@ -33,6 +33,8 @@ CONV_STRIDE = 1
 
 SINGLE_CATEGORIES = False
 SINGLE_CATEGORY = 1
+
+SAVE_MODEL = False
 
 dataDir = 'coco'
 dataType = 'val2017'
@@ -160,9 +162,10 @@ def train_model(params, data, kfold_cross_iteration):
     out = Dense(NUM_CATEGORIES if (not SINGLE_CATEGORIES) else 1, activation='sigmoid')(x)
     model = Model(inputs=input, outputs=out)
 
-    model.compile(optimizer=RMSprop(), loss='binary_crossentropy')
+    model.compile(optimizer=RMSprop(), loss='binary_crossentropy', metrics=['accuracy'])
     print(model.summary())
     plot_model(model, params.base_dir + 'graph' + str(params.nn_id) + '.png', show_shapes=True)
+
     train_generator = CocoBatchGenerator(data[0])
     val_generator = CocoBatchGenerator(data[1])
     callbacks = [TensorBoard(log_dir='./tb')]
@@ -175,10 +178,12 @@ def train_model(params, data, kfold_cross_iteration):
         validation_data=val_generator
     )
 
-    save_model(model, params.base_dir + "model" + str(params.nn_id) + '_' + str(kfold_cross_iteration) + ".h5")
+    if SAVE_MODEL:
+        save_model(model, params.base_dir + "model" + str(params.nn_id) + '_' + str(kfold_cross_iteration) + ".h5")
     with open(params.base_dir + "history" + str(params.nn_id) + '_' + str(kfold_cross_iteration) + ".txt", "w+") as f:
+        f.write('epoch,val_acc,val_loss\n')
         for i in range(len(history.history['val_loss'])):
-            f.write("{} {}\n".format(i + 1, history.history['val_loss'][i]))
+            f.write("{},{},{}\n".format(i + 1, history.history['val_acc'][i], history.history['val_loss'][i]))
 
     plot_x = list(range(1, len(history.history['val_loss']) + 1))
     plot_y = history.history['val_loss']
@@ -207,14 +212,36 @@ class KFoldCrossValidator:
         return train_data, val_data
 
 
+'''class GridSearch:
+    def __init__(self):
+        self.index = 0
+        self.params = {}
+    
+    def has_next(self):'''
+
 params = TrainParams()
 kcross = KFoldCrossValidator(4, input_imgids)
-for lr in [0.001, 0.01]:  # Learning rate
-    for cl in [1, 2]:  # Num conv layers
-        params.learning_rate = lr
-        params.conv_layers = cl
-        for k in range(len(kcross)):
-            train_model(params, kcross[k], k)
-        with open(params.base_dir + "params" + str(params.nn_id) + ".txt", "w+") as f:
-            f.write(str(params))
-        params.nn_id += 1
+for lr in [0.001, 0.01, 0.1, 1.0]:  # Learning rate
+    for cl in [1, 2, 4, 8]:  # Num conv layers
+        for cf in [16, 32, 64]:  # Num filters
+            for cs in [2, 3, 4, 6, 10]:  # Filter side length
+                for s in [1, 2, 3, 4, 5]:  # Stride
+                    try:
+                        params.learning_rate = lr
+                        params.conv_layers = cl
+                        params.conv_num_filters = cf
+                        params.conv_filter_size = (cs, cs)
+                        params.conv_stride = (s, s)
+                        params.learning_rate = 0.001
+                        params.conv_layers = 8
+                        params.conv_num_filters = 64
+                        params.conv_filter_size = (11, 11)
+                        params.conv_pooling_size=(2,2)
+                        params.conv_stride = (1, 1)
+                        for k in range(len(kcross)):
+                            train_model(params, kcross[k], k)
+                        with open(params.base_dir + "params" + str(params.nn_id) + ".txt", "w+") as f:
+                            f.write(str(params))
+                        params.nn_id += 1
+                    except:
+                        print("Invalid params")
