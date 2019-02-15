@@ -79,31 +79,31 @@ class CocoBatchGenerator(keras.utils.Sequence):
     def on_epoch_end(self):
         random.shuffle(self.img_order)
 
-    def __data_generation(self, _imgids):
+    def __data_generation(self, imgids):
         # Load image files
-        _input_imgs = [matplotlib.image.imread(
+        input_imgs = [matplotlib.image.imread(
             self.coco_path + '/images/' + ('0' * (12 - len(str(imgid)))) + str(imgid) + '.jpg'
-        ) for imgid in _imgids]
+        ) for imgid in imgids]
 
         # Rescale all images to the same size
-        _input_imgs = [cv2.resize(img, (IMAGE_SIZE, IMAGE_SIZE)) for img in _input_imgs]
+        input_imgs = [cv2.resize(img, (IMAGE_SIZE, IMAGE_SIZE)) for img in input_imgs]
 
         # Convert grayscale images to RGB
-        for _index in range(len(_input_imgs)):
-            if _input_imgs[_index].shape == (IMAGE_SIZE, IMAGE_SIZE):
-                _input_imgs[_index] = np.repeat(_input_imgs[_index], 3).reshape(IMAGE_SIZE, IMAGE_SIZE, 3)
+        for index in range(len(input_imgs)):
+            if input_imgs[index].shape == (IMAGE_SIZE, IMAGE_SIZE):
+                input_imgs[index] = np.repeat(input_imgs[index], 3).reshape(IMAGE_SIZE, IMAGE_SIZE, 3)
 
         # If enabled, normalize pixel values (ranges from [0 - 255] to [0.0 - 1.0])
         if NORMALIZE:
-            _input_imgs = [img / 255.0 for img in _input_imgs]
+            input_imgs = [img / 255.0 for img in input_imgs]
 
         # Convert the batch's X and Y to be fed to the net
-        _x_train = np.asarray(_input_imgs)
+        x_train = np.asarray(input_imgs)
         if not SINGLE_CATEGORIES:
-            _y_train = np.array([imgids_to_cats[imgid] for imgid in _imgids])
+            y_train = np.array([imgids_to_cats[imgid] for imgid in imgids])
         else:
-            _y_train = np.array([[imgids_to_cats[imgid][SINGLE_CATEGORY]] for imgid in _imgids])
-        return _x_train, _y_train
+            y_train = np.array([[imgids_to_cats[imgid][SINGLE_CATEGORY]] for imgid in imgids])
+        return x_train, y_train
 
 
 class TrainParams:
@@ -171,7 +171,7 @@ def train_model(params, data, kfold_cross_iteration):
     val_generator = CocoBatchGenerator(data[1], dataDir)
     callbacks = [TensorBoard(log_dir='./tb')]
     if params.early_stop:
-        callbacks += [EarlyStopping('loss', patience=2)]
+        callbacks += [EarlyStopping('val_loss', patience=2)]
     history = model.fit_generator(
         train_generator,
         epochs=params.epochs,
@@ -215,13 +215,6 @@ class KFoldCrossValidator:
         return train_data, val_data
 
 
-'''class GridSearch:
-    def __init__(self):
-        self.index = 0
-        self.params = {}
-    
-    def has_next(self):'''
-
 params = TrainParams()
 kcross = KFoldCrossValidator(4, input_imgids)
 
@@ -247,19 +240,12 @@ def set_random_params(p, values):
         setattr(p, k, v)
 
 
-random_times = 1
+random_times = 10
 random_results = []
 for _ in range(random_times):
     try:
         rand_params = make_random_params()
         set_random_params(params, rand_params)
-
-        params.learning_rate = 0.01
-        params.conv_layers = 8
-        params.conv_num_filters = 32
-        params.conv_filter_size = (5, 5)
-        params.conv_stride = (1,1)
-        params.conv_pooling_size = (2,2)
 
         with open(params.base_dir + "params" + str(params.nn_id) + ".txt", "w+") as f:
             f.write(str(params))
@@ -268,7 +254,7 @@ for _ in range(random_times):
         for k in range(len(kcross)):
             history = train_model(params, kcross[k], k)
             val_acc += history.history['val_acc'][-1]
-        val_acc /= k
+        val_acc /= len(kcross)
         random_results += [(rand_params, val_acc)]
         params.nn_id += 1
     except:
