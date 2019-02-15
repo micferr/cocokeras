@@ -20,11 +20,11 @@ from keras.layers import Conv2D, Input, MaxPooling2D
 
 NUM_CATEGORIES = 91  # Total number of categories in Coco dataset
 IMAGE_SIZE = 256  # Size of the input images
-LEARNING_RATE = 0.1
 NORMALIZE = True  # Normalize RGB values
 BATCH_SIZE = 32
 EPOCHS = 20
 
+LEARNING_RATE = 0.1
 CONV_LAYERS = 4  # Number of Convolution+Pooling layers
 CONV_NUM_FILTERS = 32
 CONV_FILTER_SIZE = (5, 5)
@@ -61,11 +61,12 @@ input_imgids = [img['id'] for img in coco.dataset['images']]
 
 
 class CocoBatchGenerator(keras.utils.Sequence):
-    def __init__(self, imgids):
+    def __init__(self, imgids, coco_path):
         self.img_order = imgids
+        self.coco_path = coco_path
 
     def __len__(self):
-        return int(np.floor(len(self.img_order) / BATCH_SIZE) * 0.1)
+        return int(np.floor(len(self.img_order) / BATCH_SIZE))
 
     def __getitem__(self, index):
         # Generate indexes of the batch
@@ -81,7 +82,7 @@ class CocoBatchGenerator(keras.utils.Sequence):
     def __data_generation(self, _imgids):
         # Load image files
         _input_imgs = [matplotlib.image.imread(
-            dataDir + '/images/' + ('0' * (12 - len(str(imgid)))) + str(imgid) + '.jpg'
+            self.coco_path + '/images/' + ('0' * (12 - len(str(imgid)))) + str(imgid) + '.jpg'
         ) for imgid in _imgids]
 
         # Rescale all images to the same size
@@ -166,8 +167,8 @@ def train_model(params, data, kfold_cross_iteration):
     print(model.summary())
     plot_model(model, params.base_dir + 'graph' + str(params.nn_id) + '.png', show_shapes=True)
 
-    train_generator = CocoBatchGenerator(data[0])
-    val_generator = CocoBatchGenerator(data[1])
+    train_generator = CocoBatchGenerator(data[0], dataDir)
+    val_generator = CocoBatchGenerator(data[1], dataDir)
     callbacks = [TensorBoard(log_dir='./tb')]
     if params.early_stop:
         callbacks += [EarlyStopping('loss', patience=2)]
@@ -196,6 +197,8 @@ def train_model(params, data, kfold_cross_iteration):
     plt.plot(plot_x, plot_y, color='blue', linestyle='-')
     plt.savefig(params.base_dir + 'loss' + str(params.nn_id) + '_' + str(kfold_cross_iteration) + '.png', dpi=300)
 
+    return history
+
 
 class KFoldCrossValidator:
     def __init__(self, k, data):
@@ -221,27 +224,52 @@ class KFoldCrossValidator:
 
 params = TrainParams()
 kcross = KFoldCrossValidator(4, input_imgids)
-for lr in [0.001, 0.01, 0.1, 1.0]:  # Learning rate
-    for cl in [1, 2, 4, 8]:  # Num conv layers
-        for cf in [16, 32, 64]:  # Num filters
-            for cs in [2, 3, 4, 6, 10]:  # Filter side length
-                for s in [1, 2, 3, 4, 5]:  # Stride
-                    try:
-                        params.learning_rate = lr
-                        params.conv_layers = cl
-                        params.conv_num_filters = cf
-                        params.conv_filter_size = (cs, cs)
-                        params.conv_stride = (s, s)
-                        params.learning_rate = 0.001
-                        params.conv_layers = 8
-                        params.conv_num_filters = 64
-                        params.conv_filter_size = (11, 11)
-                        params.conv_pooling_size=(2,2)
-                        params.conv_stride = (1, 1)
-                        for k in range(len(kcross)):
-                            train_model(params, kcross[k], k)
-                        with open(params.base_dir + "params" + str(params.nn_id) + ".txt", "w+") as f:
-                            f.write(str(params))
-                        params.nn_id += 1
-                    except:
-                        print("Invalid params")
+
+param_values = {
+    'learning_rate': [0.001, 0.01, 0.1, 1.0],
+    'conv_layers': [1, 2, 4, 8],
+    'conv_num_filters': [16, 32, 64],
+    'conv_filter_size': [2, 3, 4, 6, 10],
+    'conv_stride': [1, 2, 3, 4, 5],
+    'conv_pooling_size': [2, 3, 5, 10]
+}
+
+
+def make_random_params():
+    res = {}
+    for k, v in param_values.items():
+        res[k] = random.choice(v)
+    return res
+
+
+def set_random_params(p, values):
+    for k, v in values.items():
+        setattr(p, k, v)
+
+
+random_times = 1
+random_results = []
+for _ in range(random_times):
+    try:
+        rand_params = make_random_params()
+        set_random_params(params, rand_params)
+
+        params.learning_rate = 0.01
+        params.conv_layers = 8
+        params.conv_num_filters = 32
+        params.conv_filter_size = (5, 5)
+        params.conv_stride = (1,1)
+        params.conv_pooling_size = (2,2)
+
+        with open(params.base_dir + "params" + str(params.nn_id) + ".txt", "w+") as f:
+            f.write(str(params))
+
+        val_acc = 0.0
+        for k in range(len(kcross)):
+            history = train_model(params, kcross[k], k)
+            val_acc += history.history['val_acc'][-1]
+        val_acc /= k
+        random_results += [(rand_params, val_acc)]
+        params.nn_id += 1
+    except:
+        print("Invalid params!")
