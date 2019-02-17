@@ -1,3 +1,4 @@
+import copy
 import json
 import random
 
@@ -34,7 +35,7 @@ CONV_STRIDE = 1
 SINGLE_CATEGORIES = False
 SINGLE_CATEGORY = 1
 
-SAVE_MODEL = False
+SAVE_MODEL = True
 
 dataDir = 'coco'
 dataType = 'val2017'
@@ -163,7 +164,24 @@ def train_model(params, data, kfold_cross_iteration):
     out = Dense(NUM_CATEGORIES if (not SINGLE_CATEGORIES) else 1, activation='sigmoid')(x)
     model = Model(inputs=input, outputs=out)
 
-    model.compile(optimizer=RMSprop(), loss='binary_crossentropy', metrics=['accuracy'])
+    def get_weighted_loss(weights):
+        def weighted_loss(y_true, y_pred):
+            return keras.backend.mean(
+                (weights[:, 0] ** (1 - y_true)) * (weights[:, 1] ** (y_true)) * keras.backend.binary_crossentropy(y_true, y_pred),
+                axis=-1)
+
+        return weighted_loss
+    weights = np.zeros([NUM_CATEGORIES, 2])
+    for i in range(len(weights)):
+        weights[i][0] = 0.0
+        weights[i][1] = 1.0
+
+    model.compile(
+        optimizer=RMSprop(),
+        #loss='binary_crossentropy',
+        metrics=['accuracy'],
+        loss = get_weighted_loss(weights)
+    )
     print(model.summary())
     plot_model(model, params.base_dir + 'graph' + str(params.nn_id) + '.png', show_shapes=True)
 
@@ -172,6 +190,7 @@ def train_model(params, data, kfold_cross_iteration):
     callbacks = [TensorBoard(log_dir='./tb')]
     if params.early_stop:
         callbacks += [EarlyStopping('val_loss', patience=2)]
+
     history = model.fit_generator(
         train_generator,
         epochs=params.epochs,
@@ -240,12 +259,14 @@ def set_random_params(p, values):
         setattr(p, k, v)
 
 
-random_times = 10
+random_times = 2
 random_results = []
-for _ in range(random_times):
+params.nn_id = 0
+while params.nn_id != random_times:
     try:
         rand_params = make_random_params()
         set_random_params(params, rand_params)
+        params.epochs = 1
 
         with open(params.base_dir + "params" + str(params.nn_id) + ".txt", "w+") as f:
             f.write(str(params))
@@ -255,7 +276,13 @@ for _ in range(random_times):
             history = train_model(params, kcross[k], k)
             val_acc += history.history['val_acc'][-1]
         val_acc /= len(kcross)
-        random_results += [(rand_params, val_acc)]
+        random_results += [(copy.deepcopy(params), val_acc)]
         params.nn_id += 1
     except:
         print("Invalid params!")
+
+random_results.sort(key=(lambda x: x[1]), reverse=True)
+to_print = [(r[0].nn_id, r[1]) for r in random_results]
+print('ID\tAcc')
+for e in to_print:
+    print('{}\t{}'.format(e[0], e[1]))
