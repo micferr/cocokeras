@@ -35,7 +35,7 @@ CONV_STRIDE = 1
 SINGLE_CATEGORIES = False
 SINGLE_CATEGORY = 1
 
-SAVE_MODEL = True
+SAVE_MODEL = False
 
 dataDir = 'coco'
 dataType = 'val2017'
