@@ -22,6 +22,7 @@ from keras.layers import Conv2D, Input, MaxPooling2D
 NUM_CATEGORIES = 91  # Total number of categories in Coco dataset
 IMAGE_SIZE = 256  # Size of the input images
 NORMALIZE = True  # Normalize RGB values
+NORMALIZE_CLASS_WEIGHTS = False
 BATCH_SIZE = 32
 EPOCHS = 20
 
@@ -60,6 +61,13 @@ for ann in coco.dataset['annotations']:
 
 input_imgids = [img['id'] for img in coco.dataset['images']]
 
+weights = np.zeros([NUM_CATEGORIES, 2])
+for i in range(NUM_CATEGORIES):
+    weights[i][0] = sum([imgids_to_cats[id][i] for id in imgids_to_cats])
+    weights[i][1] = len(imgids_to_cats)-weights[i][0]
+    if NORMALIZE_CLASS_WEIGHTS:
+        weights[i][0] /= len(imgids_to_cats)
+        weights[i][1] /= len(imgids_to_cats)
 
 class CocoBatchGenerator(keras.utils.Sequence):
     def __init__(self, imgids, coco_path):
@@ -171,10 +179,6 @@ def train_model(params, data, kfold_cross_iteration):
                 axis=-1)
 
         return weighted_loss
-    weights = np.zeros([NUM_CATEGORIES, 2])
-    for i in range(len(weights)):
-        weights[i][0] = 0.0
-        weights[i][1] = 1.0
 
     model.compile(
         optimizer=RMSprop(),
