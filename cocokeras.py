@@ -161,7 +161,7 @@ def weighted_loss(y_true, y_pred):
             1 - y_pred),
         axis=-1)'''
     return keras.backend.mean(
-        (weights[:, 1] ** (1 - y_true)) * (weights[:, 0] ** (y_true)) * keras.backend.binary_crossentropy(y_true, y_pred),
+        (weights[:, 0] ** (1 - y_true)) * (weights[:, 1] ** (y_true)) * keras.backend.binary_crossentropy(y_true, y_pred),
         axis=-1)
 
 def train_model(params, data, kfold_cross_iteration):
