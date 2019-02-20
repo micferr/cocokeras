@@ -67,6 +67,7 @@ weights = np.zeros([NUM_CATEGORIES, 2])
 for i in range(NUM_CATEGORIES):
     weights[i][0] = sum([imgids_to_cats[id][i] for id in imgids_to_cats])
     weights[i][1] = len(imgids_to_cats) - weights[i][0]
+    #weights[i][0] *= 0.1
     if NORMALIZE_CLASS_WEIGHTS:
         weights[i][0] /= len(imgids_to_cats)
         weights[i][1] /= len(imgids_to_cats)
@@ -155,14 +156,17 @@ class TrainParams:
         return json.dumps(self, default=lambda o: o.__dict__,
                           sort_keys=True, indent=4)
 
+
 def weighted_loss(y_true, y_pred):
     '''return -keras.backend.mean(
         weights[:, 0] * (y_true) * keras.backend.log(y_pred) + weights[:, 1] * (1 - y_true) * keras.backend.log(
             1 - y_pred),
         axis=-1)'''
     return keras.backend.mean(
-        (weights[:, 0] ** (1 - y_true)) * (weights[:, 1] ** (y_true)) * keras.backend.binary_crossentropy(y_true, y_pred),
+        (weights[:, 0] ** (1 - y_true)) * (weights[:, 1] ** (y_true)) * keras.backend.binary_crossentropy(y_true,
+                                                                                                          y_pred),
         axis=-1)
+
 
 def train_model(params, data, kfold_cross_iteration):
     """
@@ -298,7 +302,7 @@ for e in to_print:
 
 # Test results
 
-model = keras.models.load_model('out/model0_0.h5', custom_objects={'weighted_loss':weighted_loss})
+model = keras.models.load_model('out/model0_0.h5', custom_objects={'weighted_loss': weighted_loss})
 input_imgs = [matplotlib.image.imread(
     dataDir + '/images/' + ('0' * (12 - len(str(imgid)))) + str(imgid) + '.jpg'
 ) for imgid in imageIds[:200]]
@@ -319,6 +323,7 @@ if NORMALIZE:
 x = np.asarray(input_imgs)
 
 res = model.predict(x)
+pr = []
 for i in range(NUM_CATEGORIES):
     tp, fp, tn, fn = 0, 0, 0, 0
     for j in range(len(res)):
@@ -333,5 +338,11 @@ for i in range(NUM_CATEGORIES):
             else:
                 tn += 1
     print('Category {}'.format(i))
-    print('TP\tFP\tTN\tFN')
-    print('{}\t{}\t{}\t{}\n'.format(tp,fp,tn,fn))
+    print('TP\tFP\tTN\tFN ')
+    print('{}\t{}\t{}\t{}\tCorrect: {}'.format(tp, fp, tn, fn, (tp + tn) / (tp + fp + tn + fn)))
+    precision = tp / (tp + fp) if (tp + fp) > 0 else 1
+    recall = tp / (tp + fn) if (tp + fn) > 0 else 1
+    pr += [(precision, recall)]
+    fscore = 2 * (precision * recall) / (precision + recall) if precision+recall > 0 else 1
+    print('Prec: {}\tRecall: {}\tF1: {}'.format(precision, recall, fscore))
+    print('')
