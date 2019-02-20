@@ -22,9 +22,11 @@ from keras.layers import Conv2D, Input, MaxPooling2D
 NUM_CATEGORIES = 91  # Total number of categories in Coco dataset
 IMAGE_SIZE = 256  # Size of the input images
 NORMALIZE = True  # Normalize RGB values
-NORMALIZE_CLASS_WEIGHTS = False
+NORMALIZE_CLASS_WEIGHTS = True
 BATCH_SIZE = 32
-EPOCHS = 20
+EPOCHS = 5
+EARLY_STOP = True
+DO_KFOLD_CROSSVAL = False
 
 LEARNING_RATE = 0.1
 CONV_LAYERS = 4  # Number of Convolution+Pooling layers
@@ -36,7 +38,7 @@ CONV_STRIDE = 1
 SINGLE_CATEGORIES = False
 SINGLE_CATEGORY = 1
 
-SAVE_MODEL = False
+SAVE_MODEL = True
 
 dataDir = 'coco'
 dataType = 'val2017'
@@ -64,10 +66,11 @@ input_imgids = [img['id'] for img in coco.dataset['images']]
 weights = np.zeros([NUM_CATEGORIES, 2])
 for i in range(NUM_CATEGORIES):
     weights[i][0] = sum([imgids_to_cats[id][i] for id in imgids_to_cats])
-    weights[i][1] = len(imgids_to_cats)-weights[i][0]
+    weights[i][1] = len(imgids_to_cats) - weights[i][0]
     if NORMALIZE_CLASS_WEIGHTS:
         weights[i][0] /= len(imgids_to_cats)
         weights[i][1] /= len(imgids_to_cats)
+
 
 class CocoBatchGenerator(keras.utils.Sequence):
     def __init__(self, imgids, coco_path):
@@ -122,7 +125,7 @@ class TrainParams:
             batch_size=BATCH_SIZE,
             epochs=EPOCHS,
             learning_rate=LEARNING_RATE,
-            early_stop=True,
+            early_stop=EARLY_STOP,
             image_size=IMAGE_SIZE,
 
             conv_layers=CONV_LAYERS,
@@ -152,6 +155,14 @@ class TrainParams:
         return json.dumps(self, default=lambda o: o.__dict__,
                           sort_keys=True, indent=4)
 
+def weighted_loss(y_true, y_pred):
+    '''return -keras.backend.mean(
+        weights[:, 0] * (y_true) * keras.backend.log(y_pred) + weights[:, 1] * (1 - y_true) * keras.backend.log(
+            1 - y_pred),
+        axis=-1)'''
+    return keras.backend.mean(
+        (weights[:, 1] ** (1 - y_true)) * (weights[:, 0] ** (y_true)) * keras.backend.binary_crossentropy(y_true, y_pred),
+        axis=-1)
 
 def train_model(params, data, kfold_cross_iteration):
     """
@@ -172,19 +183,11 @@ def train_model(params, data, kfold_cross_iteration):
     out = Dense(NUM_CATEGORIES if (not SINGLE_CATEGORIES) else 1, activation='sigmoid')(x)
     model = Model(inputs=input, outputs=out)
 
-    def get_weighted_loss(weights):
-        def weighted_loss(y_true, y_pred):
-            return keras.backend.mean(
-                (weights[:, 0] ** (1 - y_true)) * (weights[:, 1] ** (y_true)) * keras.backend.binary_crossentropy(y_true, y_pred),
-                axis=-1)
-
-        return weighted_loss
-
     model.compile(
         optimizer=RMSprop(),
-        #loss='binary_crossentropy',
+        # loss='binary_crossentropy',
         metrics=['accuracy'],
-        loss = get_weighted_loss(weights)
+        loss=weighted_loss
     )
     print(model.summary())
     plot_model(model, params.base_dir + 'graph' + str(params.nn_id) + '.png', show_shapes=True)
@@ -263,14 +266,13 @@ def set_random_params(p, values):
         setattr(p, k, v)
 
 
-random_times = 2
+random_times = 1
 random_results = []
 params.nn_id = 0
 while params.nn_id != random_times:
     try:
         rand_params = make_random_params()
         set_random_params(params, rand_params)
-        params.epochs = 1
 
         with open(params.base_dir + "params" + str(params.nn_id) + ".txt", "w+") as f:
             f.write(str(params))
@@ -279,6 +281,9 @@ while params.nn_id != random_times:
         for k in range(len(kcross)):
             history = train_model(params, kcross[k], k)
             val_acc += history.history['val_acc'][-1]
+            if not DO_KFOLD_CROSSVAL:
+                val_acc *= len(kcross)
+                break
         val_acc /= len(kcross)
         random_results += [(copy.deepcopy(params), val_acc)]
         params.nn_id += 1
@@ -290,3 +295,43 @@ to_print = [(r[0].nn_id, r[1]) for r in random_results]
 print('ID\tAcc')
 for e in to_print:
     print('{}\t{}'.format(e[0], e[1]))
+
+# Test results
+
+model = keras.models.load_model('out/model0_0.h5', custom_objects={'weighted_loss':weighted_loss})
+input_imgs = [matplotlib.image.imread(
+    dataDir + '/images/' + ('0' * (12 - len(str(imgid)))) + str(imgid) + '.jpg'
+) for imgid in imageIds[:200]]
+
+# Rescale all images to the same size
+input_imgs = [cv2.resize(img, (IMAGE_SIZE, IMAGE_SIZE)) for img in input_imgs]
+
+# Convert grayscale images to RGB
+for index in range(len(input_imgs)):
+    if input_imgs[index].shape == (IMAGE_SIZE, IMAGE_SIZE):
+        input_imgs[index] = np.repeat(input_imgs[index], 3).reshape(IMAGE_SIZE, IMAGE_SIZE, 3)
+
+# If enabled, normalize pixel values (ranges from [0 - 255] to [0.0 - 1.0])
+if NORMALIZE:
+    input_imgs = [img / 255.0 for img in input_imgs]
+
+# Test x
+x = np.asarray(input_imgs)
+
+res = model.predict(x)
+for i in range(NUM_CATEGORIES):
+    tp, fp, tn, fn = 0, 0, 0, 0
+    for j in range(len(res)):
+        if res[j][i] >= 0.5:
+            if imgids_to_cats[imageIds[j]][i] == 1:
+                tp += 1
+            else:
+                fp += 1
+        else:
+            if imgids_to_cats[imageIds[j]][i] == 1:
+                fn += 1
+            else:
+                tn += 1
+    print('Category {}'.format(i))
+    print('TP\tFP\tTN\tFN')
+    print('{}\t{}\t{}\t{}\n'.format(tp,fp,tn,fn))
