@@ -67,10 +67,10 @@ weights = np.zeros([NUM_CATEGORIES, 2])
 for i in range(NUM_CATEGORIES):
     weights[i][0] = sum([imgids_to_cats[id][i] for id in imgids_to_cats])
     weights[i][1] = len(imgids_to_cats) - weights[i][0]
-    #weights[i][0] *= 0.1
     if NORMALIZE_CLASS_WEIGHTS:
         weights[i][0] /= len(imgids_to_cats)
         weights[i][1] /= len(imgids_to_cats)
+        weights[i] += 0.01  # Account for totally imbalanced classes
 
 
 class CocoBatchGenerator(keras.utils.Sequence):
@@ -109,6 +109,7 @@ class CocoBatchGenerator(keras.utils.Sequence):
         # If enabled, normalize pixel values (ranges from [0 - 255] to [0.0 - 1.0])
         if NORMALIZE:
             input_imgs = [img / 255.0 for img in input_imgs]
+            input_imgs = [(img-.5)*2 for img in input_imgs]
 
         # Convert the batch's X and Y to be fed to the net
         x_train = np.asarray(input_imgs)
@@ -162,9 +163,13 @@ def weighted_loss(y_true, y_pred):
         weights[:, 0] * (y_true) * keras.backend.log(y_pred) + weights[:, 1] * (1 - y_true) * keras.backend.log(
             1 - y_pred),
         axis=-1)'''
-    return keras.backend.mean(
+    '''return keras.backend.mean(
         (weights[:, 0] ** (1 - y_true)) * (weights[:, 1] ** (y_true)) * keras.backend.binary_crossentropy(y_true,
                                                                                                           y_pred),
+        axis=-1)'''
+    return -keras.backend.mean(
+        weights[:, 0] * (1 - y_true) * keras.backend.log(1 - y_pred) +
+        weights[:, 1] * (y_true) * keras.backend.log(y_pred),
         axis=-1)
 
 
@@ -189,7 +194,6 @@ def train_model(params, data, kfold_cross_iteration):
 
     model.compile(
         optimizer=RMSprop(),
-        # loss='binary_crossentropy',
         metrics=['accuracy'],
         loss=weighted_loss
     )
@@ -277,6 +281,13 @@ while params.nn_id != random_times:
     try:
         rand_params = make_random_params()
         set_random_params(params, rand_params)
+        params.conv_num_filters = 64
+        params.epochs = 10
+        params.conv_pooling_size = 2
+        params.conv_layers = 2
+        params.conv_stride = 2
+        params.conv_filter_size = 4
+        params.early_stop = False
 
         with open(params.base_dir + "params" + str(params.nn_id) + ".txt", "w+") as f:
             f.write(str(params))
@@ -305,7 +316,7 @@ for e in to_print:
 model = keras.models.load_model('out/model0_0.h5', custom_objects={'weighted_loss': weighted_loss})
 input_imgs = [matplotlib.image.imread(
     dataDir + '/images/' + ('0' * (12 - len(str(imgid)))) + str(imgid) + '.jpg'
-) for imgid in imageIds[:200]]
+) for imgid in imageIds[-200:]]
 
 # Rescale all images to the same size
 input_imgs = [cv2.resize(img, (IMAGE_SIZE, IMAGE_SIZE)) for img in input_imgs]
@@ -315,9 +326,10 @@ for index in range(len(input_imgs)):
     if input_imgs[index].shape == (IMAGE_SIZE, IMAGE_SIZE):
         input_imgs[index] = np.repeat(input_imgs[index], 3).reshape(IMAGE_SIZE, IMAGE_SIZE, 3)
 
-# If enabled, normalize pixel values (ranges from [0 - 255] to [0.0 - 1.0])
+# If enabled, normalize pixel values (ranges from [0 - 255] to [-1.0 - 1.0])
 if NORMALIZE:
     input_imgs = [img / 255.0 for img in input_imgs]
+    input_imgs = [(img-.5)*2 for img in input_imgs]
 
 # Test x
 x = np.asarray(input_imgs)
