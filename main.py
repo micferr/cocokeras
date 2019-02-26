@@ -1,8 +1,6 @@
 import copy
-import json
 import random
 
-import cv2
 import keras
 import matplotlib.image
 import numpy as np
@@ -19,30 +17,10 @@ from keras.models import save_model
 from keras.layers import Dense, Flatten
 from keras.layers import Conv2D, Input, MaxPooling2D
 
-NUM_CATEGORIES = 91  # Total number of categories in Coco dataset
-IMAGE_SIZE = 256  # Size of the input images
-NORMALIZE = True  # Normalize RGB values
-NORMALIZE_CLASS_WEIGHTS = True
-BATCH_SIZE = 32
-EPOCHS = 5
-EARLY_STOP = True
-DO_KFOLD_CROSSVAL = False
-
-LEARNING_RATE = 0.1
-CONV_LAYERS = 4  # Number of Convolution+Pooling layers
-CONV_NUM_FILTERS = 32
-CONV_FILTER_SIZE = (5, 5)
-CONV_POOLING_SIZE = (3, 3)
-CONV_STRIDE = 1
-
-SINGLE_CATEGORIES = False
-SINGLE_CATEGORY = 1
-
-SAVE_MODEL = True
-
-dataDir = 'coco'
-dataType = 'val2017'
-annFile = '{}/annotations/instances_{}.json'.format(dataDir, dataType)
+import train_utils
+from app_params import NUM_CATEGORIES, NORMALIZE_CLASS_WEIGHTS, DO_KFOLD_CROSSVAL, SINGLE_CATEGORIES, SINGLE_CATEGORY, \
+    SAVE_MODEL, dataDir, annFile
+from train_utils import TrainParams, KFoldCrossValidator, set_random_params, IMAGE_SIZE, NORMALIZE, BATCH_SIZE
 
 # initialize COCO api for instance annotations
 coco = COCO(annFile)
@@ -99,17 +77,7 @@ class CocoBatchGenerator(keras.utils.Sequence):
         ) for imgid in imgids]
 
         # Rescale all images to the same size
-        input_imgs = [cv2.resize(img, (IMAGE_SIZE, IMAGE_SIZE)) for img in input_imgs]
-
-        # Convert grayscale images to RGB
-        for index in range(len(input_imgs)):
-            if input_imgs[index].shape == (IMAGE_SIZE, IMAGE_SIZE):
-                input_imgs[index] = np.repeat(input_imgs[index], 3).reshape(IMAGE_SIZE, IMAGE_SIZE, 3)
-
-        # If enabled, normalize pixel values (ranges from [0 - 255] to [0.0 - 1.0])
-        if NORMALIZE:
-            input_imgs = [img / 255.0 for img in input_imgs]
-            input_imgs = [(img-.5)*2 for img in input_imgs]
+        input_imgs = [train_utils.preprocess_image(img, params.image_size, NORMALIZE) for img in input_imgs]
 
         # Convert the batch's X and Y to be fed to the net
         x_train = np.asarray(input_imgs)
@@ -120,53 +88,7 @@ class CocoBatchGenerator(keras.utils.Sequence):
         return x_train, y_train
 
 
-class TrainParams:
-    def __init__(
-            self,
-            nn_id=0,
-            batch_size=BATCH_SIZE,
-            epochs=EPOCHS,
-            learning_rate=LEARNING_RATE,
-            early_stop=EARLY_STOP,
-            image_size=IMAGE_SIZE,
-
-            conv_layers=CONV_LAYERS,
-            conv_num_filters=CONV_NUM_FILTERS,
-            conv_filter_size=CONV_FILTER_SIZE,
-            conv_pooling_size=CONV_POOLING_SIZE,
-            conv_stride=CONV_STRIDE,
-
-            base_dir="./out/"
-    ):
-        self.nn_id = nn_id
-        self.batch_size = batch_size
-        self.epochs = epochs
-        self.learning_rate = learning_rate
-        self.early_stop = early_stop
-        self.image_size = image_size
-
-        self.conv_layers = conv_layers
-        self.conv_num_filters = conv_num_filters
-        self.conv_filter_size = conv_filter_size
-        self.conv_pooling_size = conv_pooling_size
-        self.conv_stride = conv_stride
-
-        self.base_dir = base_dir
-
-    def __str__(self):
-        return json.dumps(self, default=lambda o: o.__dict__,
-                          sort_keys=True, indent=4)
-
-
 def weighted_loss(y_true, y_pred):
-    '''return -keras.backend.mean(
-        weights[:, 0] * (y_true) * keras.backend.log(y_pred) + weights[:, 1] * (1 - y_true) * keras.backend.log(
-            1 - y_pred),
-        axis=-1)'''
-    '''return keras.backend.mean(
-        (weights[:, 0] ** (1 - y_true)) * (weights[:, 1] ** (y_true)) * keras.backend.binary_crossentropy(y_true,
-                                                                                                          y_pred),
-        axis=-1)'''
     return -keras.backend.mean(
         weights[:, 0] * (1 - y_true) * keras.backend.log(1 - y_pred) +
         weights[:, 1] * (y_true) * keras.backend.log(y_pred),
@@ -175,7 +97,7 @@ def weighted_loss(y_true, y_pred):
 
 def train_model(params, data, kfold_cross_iteration):
     """
-    :type params: TrainParams
+    :type params: train_utils.TrainParams
     """
     # Create the model
     input = Input(shape=(params.image_size, params.image_size, 3))
@@ -234,53 +156,15 @@ def train_model(params, data, kfold_cross_iteration):
     return history
 
 
-class KFoldCrossValidator:
-    def __init__(self, k, data):
-        self.k = k
-        self.data = data
-
-    def __len__(self):
-        return self.k
-
-    def __getitem__(self, item):
-        val_size = len(self.data) // self.k
-        train_data = self.data[:item * val_size] + self.data[(item + 1) * val_size:]
-        val_data = self.data[item * val_size: (item + 1) * val_size]
-        return train_data, val_data
-
-
 params = TrainParams()
 kcross = KFoldCrossValidator(4, input_imgids)
-
-param_values = {
-    'learning_rate': [0.001, 0.01, 0.1, 1.0],
-    'conv_layers': [1, 2, 4, 8],
-    'conv_num_filters': [16, 32, 64],
-    'conv_filter_size': [2, 3, 4, 6, 10],
-    'conv_stride': [1, 2, 3, 4, 5],
-    'conv_pooling_size': [2, 3, 5, 10]
-}
-
-
-def make_random_params():
-    res = {}
-    for k, v in param_values.items():
-        res[k] = random.choice(v)
-    return res
-
-
-def set_random_params(p, values):
-    for k, v in values.items():
-        setattr(p, k, v)
-
 
 random_times = 1
 random_results = []
 params.nn_id = 0
 while params.nn_id != random_times:
     try:
-        rand_params = make_random_params()
-        set_random_params(params, rand_params)
+        set_random_params(params)
         params.conv_num_filters = 64
         params.epochs = 10
         params.conv_pooling_size = 2
@@ -318,18 +202,7 @@ input_imgs = [matplotlib.image.imread(
     dataDir + '/images/' + ('0' * (12 - len(str(imgid)))) + str(imgid) + '.jpg'
 ) for imgid in imageIds[-200:]]
 
-# Rescale all images to the same size
-input_imgs = [cv2.resize(img, (IMAGE_SIZE, IMAGE_SIZE)) for img in input_imgs]
-
-# Convert grayscale images to RGB
-for index in range(len(input_imgs)):
-    if input_imgs[index].shape == (IMAGE_SIZE, IMAGE_SIZE):
-        input_imgs[index] = np.repeat(input_imgs[index], 3).reshape(IMAGE_SIZE, IMAGE_SIZE, 3)
-
-# If enabled, normalize pixel values (ranges from [0 - 255] to [-1.0 - 1.0])
-if NORMALIZE:
-    input_imgs = [img / 255.0 for img in input_imgs]
-    input_imgs = [(img-.5)*2 for img in input_imgs]
+input_imgs = [train_utils.preprocess_image(img, params.image_size, NORMALIZE) for img in input_imgs]
 
 # Test x
 x = np.asarray(input_imgs)
@@ -355,6 +228,6 @@ for i in range(NUM_CATEGORIES):
     precision = tp / (tp + fp) if (tp + fp) > 0 else 1
     recall = tp / (tp + fn) if (tp + fn) > 0 else 1
     pr += [(precision, recall)]
-    fscore = 2 * (precision * recall) / (precision + recall) if precision+recall > 0 else 1
+    fscore = 2 * (precision * recall) / (precision + recall) if precision + recall > 0 else 1
     print('Prec: {}\tRecall: {}\tF1: {}'.format(precision, recall, fscore))
     print('')
