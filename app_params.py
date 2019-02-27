@@ -6,5 +6,5 @@ SINGLE_CATEGORY = 1
 SAVE_MODEL = True
 
 dataDir = 'coco'
-dataType = 'val2017'
+dataType = 'train2017'
 annFile = '{}/annotations/instances_{}.json'.format(dataDir, dataType)

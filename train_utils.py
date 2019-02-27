@@ -68,11 +68,11 @@ class CocoBatchGenerator(keras.utils.Sequence):
         self.imgids_to_cats = imgids_to_cats
 
     def __len__(self):
-        return int(np.floor(len(self.img_order) / BATCH_SIZE))
+        return int(np.floor(len(self.img_order) / self.params.batch_size))
 
     def __getitem__(self, index):
         # Generate indexes of the batch
-        indexes = self.img_order[index * BATCH_SIZE: (index + 1) * BATCH_SIZE]
+        indexes = self.img_order[index * self.params.batch_size: (index + 1) * self.params.batch_size]
 
         # Generate data
         x, y = self.__data_generation(indexes)

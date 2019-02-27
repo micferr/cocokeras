@@ -134,6 +134,7 @@ while params.nn_id != random_times:
         params.conv_stride = 2
         params.conv_filter_size = 4
         params.early_stop = False
+        params.batch_size = 128
 
         with open(params.base_dir + "params" + str(params.nn_id) + ".txt", "w+") as f:
             f.write(str(params))
