@@ -125,31 +125,31 @@ random_times = 1
 random_results = []
 params.nn_id = 0
 while params.nn_id != random_times:
-    # try:
-    set_random_params(params)
-    params.conv_num_filters = 64
-    params.epochs = 10
-    params.conv_pooling_size = 2
-    params.conv_layers = 2
-    params.conv_stride = 2
-    params.conv_filter_size = 4
-    params.early_stop = False
+    try:
+        set_random_params(params)
+        params.conv_num_filters = 64
+        params.epochs = 10
+        params.conv_pooling_size = 2
+        params.conv_layers = 2
+        params.conv_stride = 2
+        params.conv_filter_size = 4
+        params.early_stop = False
 
-    with open(params.base_dir + "params" + str(params.nn_id) + ".txt", "w+") as f:
-        f.write(str(params))
+        with open(params.base_dir + "params" + str(params.nn_id) + ".txt", "w+") as f:
+            f.write(str(params))
 
-    val_acc = 0.0
-    for k in range(len(kcross)):
-        history = train_model(params, kcross[k], k)
-        val_acc += history.history['val_acc'][-1]
-        if not DO_KFOLD_CROSSVAL:
-            val_acc *= len(kcross)
-            break
-    val_acc /= len(kcross)
-    random_results += [(copy.deepcopy(params), val_acc)]
-    params.nn_id += 1
-    # except:
-    # print("Invalid params!")
+        val_acc = 0.0
+        for k in range(len(kcross)):
+            history = train_model(params, kcross[k], k)
+            val_acc += history.history['val_acc'][-1]
+            if not DO_KFOLD_CROSSVAL:
+                val_acc *= len(kcross)
+                break
+        val_acc /= len(kcross)
+        random_results += [(copy.deepcopy(params), val_acc)]
+        params.nn_id += 1
+    except:
+        print("Invalid params!")
 
 random_results.sort(key=(lambda x: x[1]), reverse=True)
 to_print = [(r[0].nn_id, r[1]) for r in random_results]
