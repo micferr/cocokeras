@@ -2,7 +2,12 @@ import json
 import random
 
 import cv2
+import keras
+import matplotlib.image
 import numpy as np
+
+import app_params
+from app_params import SINGLE_CATEGORIES, SINGLE_CATEGORY
 
 IMAGE_SIZE = 256  # Size of the input images
 NORMALIZE = True  # Normalize RGB values
@@ -53,6 +58,46 @@ class TrainParams:
     def __str__(self):
         return json.dumps(self, default=lambda o: o.__dict__,
                           sort_keys=True, indent=4)
+
+
+class CocoBatchGenerator(keras.utils.Sequence):
+    def __init__(self, imgids, coco_path, params, imgids_to_cats):
+        self.img_order = imgids
+        self.coco_path = coco_path
+        self.params = params
+        self.imgids_to_cats = imgids_to_cats
+
+    def __len__(self):
+        return int(np.floor(len(self.img_order) / BATCH_SIZE))
+
+    def __getitem__(self, index):
+        # Generate indexes of the batch
+        indexes = self.img_order[index * BATCH_SIZE: (index + 1) * BATCH_SIZE]
+
+        # Generate data
+        x, y = self.__data_generation(indexes)
+        return x, y
+
+    def on_epoch_end(self):
+        random.shuffle(self.img_order)
+
+    def __data_generation(self, imgids):
+        # Load image files
+        input_imgs = [matplotlib.image.imread(
+            self.coco_path + '/images/' + app_params.dataType + '/' + ('0' * (12 - len(str(imgid)))) + str(
+                imgid) + '.jpg'
+        ) for imgid in imgids]
+
+        # Rescale all images to the same size
+        input_imgs = [preprocess_image(img, self.params.image_size, NORMALIZE) for img in input_imgs]
+
+        # Convert the batch's X and Y to be fed to the net
+        x_train = np.asarray(input_imgs)
+        if not SINGLE_CATEGORIES:
+            y_train = np.array([self.imgids_to_cats[imgid] for imgid in imgids])
+        else:
+            y_train = np.array([[self.imgids_to_cats[imgid][SINGLE_CATEGORY]] for imgid in imgids])
+        return x_train, y_train
 
 
 class KFoldCrossValidator:

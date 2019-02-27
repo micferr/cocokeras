@@ -1,5 +1,4 @@
 import copy
-import random
 
 import keras
 import matplotlib.image
@@ -18,9 +17,9 @@ from keras.layers import Dense, Flatten
 from keras.layers import Conv2D, Input, MaxPooling2D
 
 import train_utils
-from app_params import NUM_CATEGORIES, NORMALIZE_CLASS_WEIGHTS, DO_KFOLD_CROSSVAL, SINGLE_CATEGORIES, SINGLE_CATEGORY, \
-    SAVE_MODEL, dataDir, annFile
-from train_utils import TrainParams, KFoldCrossValidator, set_random_params, IMAGE_SIZE, NORMALIZE, BATCH_SIZE
+from app_params import NUM_CATEGORIES, NORMALIZE_CLASS_WEIGHTS, DO_KFOLD_CROSSVAL, SINGLE_CATEGORIES, SAVE_MODEL, \
+    dataDir, annFile
+from train_utils import TrainParams, KFoldCrossValidator, set_random_params, NORMALIZE, CocoBatchGenerator
 
 # initialize COCO api for instance annotations
 coco = COCO(annFile)
@@ -49,43 +48,6 @@ for i in range(NUM_CATEGORIES):
         weights[i][0] /= len(imgids_to_cats)
         weights[i][1] /= len(imgids_to_cats)
         weights[i] += 0.01  # Account for totally imbalanced classes
-
-
-class CocoBatchGenerator(keras.utils.Sequence):
-    def __init__(self, imgids, coco_path):
-        self.img_order = imgids
-        self.coco_path = coco_path
-
-    def __len__(self):
-        return int(np.floor(len(self.img_order) / BATCH_SIZE))
-
-    def __getitem__(self, index):
-        # Generate indexes of the batch
-        indexes = self.img_order[index * BATCH_SIZE: (index + 1) * BATCH_SIZE]
-
-        # Generate data
-        x, y = self.__data_generation(indexes)
-        return x, y
-
-    def on_epoch_end(self):
-        random.shuffle(self.img_order)
-
-    def __data_generation(self, imgids):
-        # Load image files
-        input_imgs = [matplotlib.image.imread(
-            self.coco_path + '/images/' + ('0' * (12 - len(str(imgid)))) + str(imgid) + '.jpg'
-        ) for imgid in imgids]
-
-        # Rescale all images to the same size
-        input_imgs = [train_utils.preprocess_image(img, params.image_size, NORMALIZE) for img in input_imgs]
-
-        # Convert the batch's X and Y to be fed to the net
-        x_train = np.asarray(input_imgs)
-        if not SINGLE_CATEGORIES:
-            y_train = np.array([imgids_to_cats[imgid] for imgid in imgids])
-        else:
-            y_train = np.array([[imgids_to_cats[imgid][SINGLE_CATEGORY]] for imgid in imgids])
-        return x_train, y_train
 
 
 def weighted_loss(y_true, y_pred):
@@ -122,8 +84,8 @@ def train_model(params, data, kfold_cross_iteration):
     print(model.summary())
     plot_model(model, params.base_dir + 'graph' + str(params.nn_id) + '.png', show_shapes=True)
 
-    train_generator = CocoBatchGenerator(data[0], dataDir)
-    val_generator = CocoBatchGenerator(data[1], dataDir)
+    train_generator = CocoBatchGenerator(data[0], dataDir, params, imgids_to_cats)
+    val_generator = CocoBatchGenerator(data[1], dataDir, params, imgids_to_cats)
     callbacks = [TensorBoard(log_dir='./tb')]
     if params.early_stop:
         callbacks += [EarlyStopping('val_loss', patience=2)]
@@ -163,31 +125,31 @@ random_times = 1
 random_results = []
 params.nn_id = 0
 while params.nn_id != random_times:
-    try:
-        set_random_params(params)
-        params.conv_num_filters = 64
-        params.epochs = 10
-        params.conv_pooling_size = 2
-        params.conv_layers = 2
-        params.conv_stride = 2
-        params.conv_filter_size = 4
-        params.early_stop = False
+    # try:
+    set_random_params(params)
+    params.conv_num_filters = 64
+    params.epochs = 10
+    params.conv_pooling_size = 2
+    params.conv_layers = 2
+    params.conv_stride = 2
+    params.conv_filter_size = 4
+    params.early_stop = False
 
-        with open(params.base_dir + "params" + str(params.nn_id) + ".txt", "w+") as f:
-            f.write(str(params))
+    with open(params.base_dir + "params" + str(params.nn_id) + ".txt", "w+") as f:
+        f.write(str(params))
 
-        val_acc = 0.0
-        for k in range(len(kcross)):
-            history = train_model(params, kcross[k], k)
-            val_acc += history.history['val_acc'][-1]
-            if not DO_KFOLD_CROSSVAL:
-                val_acc *= len(kcross)
-                break
-        val_acc /= len(kcross)
-        random_results += [(copy.deepcopy(params), val_acc)]
-        params.nn_id += 1
-    except:
-        print("Invalid params!")
+    val_acc = 0.0
+    for k in range(len(kcross)):
+        history = train_model(params, kcross[k], k)
+        val_acc += history.history['val_acc'][-1]
+        if not DO_KFOLD_CROSSVAL:
+            val_acc *= len(kcross)
+            break
+    val_acc /= len(kcross)
+    random_results += [(copy.deepcopy(params), val_acc)]
+    params.nn_id += 1
+    # except:
+    # print("Invalid params!")
 
 random_results.sort(key=(lambda x: x[1]), reverse=True)
 to_print = [(r[0].nn_id, r[1]) for r in random_results]
