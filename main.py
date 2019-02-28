@@ -62,7 +62,7 @@ def train_model(params, data, kfold_cross_iteration):
     :type params: train_utils.TrainParams
     """
     # Create the model
-    input = Input(shape=(params.image_size, params.image_size, 3))
+    input = Input(shape=(params.image_size, params.image_size, 4))
     for i in range(params.conv_layers):
         x = Conv2D(
             params.conv_num_filters,
@@ -81,6 +81,19 @@ def train_model(params, data, kfold_cross_iteration):
         metrics=['accuracy'],
         loss=weighted_loss
     )
+
+    input = Input(shape=(1000,))
+    x = Dense(256, activation='relu')(input)
+    x = Dense(256, activation='relu')(x)
+    x = Dense(256, activation='relu')(x)
+    out = Dense(NUM_CATEGORIES, activation='softmax')(x)
+    model = Model(inputs=input, outputs=out)
+    model.compile(
+        optimizer=RMSprop(),
+        metrics=['accuracy'],
+        loss = 'categorical_crossentropy'
+    )
+
     print(model.summary())
     plot_model(model, params.base_dir + 'graph' + str(params.nn_id) + '.png', show_shapes=True)
 
@@ -94,7 +107,8 @@ def train_model(params, data, kfold_cross_iteration):
         train_generator,
         epochs=params.epochs,
         callbacks=callbacks,
-        validation_data=val_generator
+        validation_data=val_generator,
+        workers=0  # Avoid lots of multi-threading errors
     )
 
     if SAVE_MODEL:
@@ -125,7 +139,7 @@ random_times = 1
 random_results = []
 params.nn_id = 0
 while params.nn_id != random_times:
-    try:
+        #try:
         set_random_params(params)
         params.conv_num_filters = 64
         params.epochs = 10
@@ -149,8 +163,8 @@ while params.nn_id != random_times:
         val_acc /= len(kcross)
         random_results += [(copy.deepcopy(params), val_acc)]
         params.nn_id += 1
-    except:
-        print("Invalid params!")
+        #except:
+        #print("Invalid params!")
 
 random_results.sort(key=(lambda x: x[1]), reverse=True)
 to_print = [(r[0].nn_id, r[1]) for r in random_results]

@@ -66,6 +66,7 @@ class CocoBatchGenerator(keras.utils.Sequence):
         self.coco_path = coco_path
         self.params = params
         self.imgids_to_cats = imgids_to_cats
+        self.model = keras.applications.resnet50.ResNet50(weights='imagenet')
 
     def __len__(self):
         return int(np.floor(len(self.img_order) / self.params.batch_size))
@@ -89,7 +90,10 @@ class CocoBatchGenerator(keras.utils.Sequence):
         ) for imgid in imgids]
 
         # Rescale all images to the same size
-        input_imgs = [preprocess_image(img, self.params.image_size, NORMALIZE) for img in input_imgs]
+        # input_imgs = [preprocess_image(img, self.params.image_size, NORMALIZE) for img in input_imgs]
+        input_imgs = [cv2.resize(img, (224, 224)) for img in input_imgs]
+        input_imgs = [np.repeat(img, 3).reshape((224, 224, 3)) if len(img.shape) == 2 else img for img in input_imgs]
+        input_imgs = self.model.predict(np.asarray(input_imgs))
 
         # Convert the batch's X and Y to be fed to the net
         x_train = np.asarray(input_imgs)
@@ -115,19 +119,27 @@ class KFoldCrossValidator:
         return train_data, val_data
 
 
-def preprocess_image(img, image_size, normalize):
+model = keras.applications.resnet50.ResNet50(weights='imagenet')
+
+
+def preprocess_image(image, image_size, normalize):
     """
-    Returns the result of image preprocessing on img
+    Returns the result of image preprocessing on image
     """
     # Rescale image to a fixed size
-    img = cv2.resize(img, (image_size, image_size))
+    img = cv2.resize(image, (image_size, image_size))
 
     # If grayscale, convert to RGB
     if img.shape == (image_size, image_size):
-        img = np.repeat(img, 3).reshape(image_size, image_size, 3)
+        img = np.repeat(img, 3).reshape((image_size, image_size, 3))
+
+    edges = cv2.Canny(img.astype(np.uint8), 100., 200.)
+    # edges = edges.reshape((image_size, image_size, 1))
+
+    # img = np.concatenate([img, edges], axis=2)
 
     # If enabled, normalize pixel values (ranges from [0 - 255] to [-1.0 - 1.0])
-    if normalize:
+    if normalize and False:
         img = ((img / 255.0) - .5) * 2
 
     return img
